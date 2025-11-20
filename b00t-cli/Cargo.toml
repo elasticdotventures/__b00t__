@@ -29,6 +29,7 @@ path = "src/bin/mcp-user.rs"
 [lib]
 name = "b00t_cli"
 path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 tiktoken-rs = "0.9.1"
@@ -63,6 +64,7 @@ reqwest = { version = "0.12.23", features = ["json"] }
 whoami = "1.5"
 b00t-chat = { workspace = true }
 env_logger = "0.11"
+pyo3 = { version = "0.21.0", features = ["extension-module"] }
 
 
 [dev-dependencies]

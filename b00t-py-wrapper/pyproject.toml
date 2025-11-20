@@ -1,0 +1,38 @@
+[build-system]
+requires = [
+    "setuptools>=62.0",
+    "setuptools-rust>=1.5"
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "b00t"
+version = "0.1.0"
+authors = [
+  { name="b00t-devs", email="dev@b00t.com" },
+]
+description = "The b00t command-line interface"
+readme = "README.md"
+requires-python = ">=3.8"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Rust",
+    "Operating System :: OS Independent",
+]
+
+# This is the magic part that creates the `b00t` command in the user's environment.
+[project.scripts]
+b00t = "b00t_wrapper.main:main"
+
+[tool.setuptools]
+packages = ["b00t_wrapper"]
+package-dir = {"" = "src"}
+include-package-data = true
+zip-safe = false
+
+[tool.setuptools-rust]
+# This points to the Cargo.toml of the Rust project to compile.
+# The path is relative to this pyproject.toml file.
+rust-extensions = [
+    { target = "b00t_wrapper.b00t_cli", path = "../b00t-cli/Cargo.toml", binding = "PyO3", features = ["pyo3"] }
+]

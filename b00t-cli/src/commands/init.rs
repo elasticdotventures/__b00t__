@@ -4,6 +4,7 @@ use crate::traits::*;
 use crate::whoami;
 use anyhow::Result;
 use clap::Parser;
+use dirs;
 use duct::cmd;
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -658,7 +659,21 @@ impl InitCommands {
     pub fn execute(&self, path: &str) -> Result<()> {
         match self {
             InitCommands::Aliases => {
-                println!("🔗 Init aliases functionality coming soon...");
+                // Check for cargo path and suggest adding it to the environment.
+                if let Some(home_dir) = dirs::home_dir() {
+                    let cargo_bin_path = home_dir.join(".cargo").join("bin");
+                    if cargo_bin_path.exists() {
+                        if let Ok(path_var) = std::env::var("PATH") {
+                            if !path_var.contains(&cargo_bin_path.to_string_lossy().to_string()) {
+                                // This command, when evaluated in PowerShell, adds .cargo/bin to the session's PATH.
+                                println!("$env:Path += ';{}'", cargo_bin_path.display());
+                            }
+                        }
+                    }
+                }
+                
+                // Future alias logic can be added here.
+                println!("# Run this command to apply changes: iex (b00t init)");
                 Ok(())
             }
             InitCommands::HelloWorld {

@@ -1135,6 +1135,7 @@ fn check_readme_status(memory: &mut session_memory::SessionMemory) -> Result<()>
     Ok(())
 }
 
+/*
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
@@ -1333,4 +1334,94 @@ async fn main() {
             std::process::exit(1);
         }
     }
+}
+*/
+
+
+use pyo3::prelude::*;
+
+async fn run_app<I, T>(args: I) -> Result<()>
+where
+    I: IntoIterator<Item = T>,
+    T: Into<std::ffi::OsString> + Clone,
+{
+    let cli = Cli::parse_from(args);
+
+    if cli.doc {
+        generate_documentation();
+        return Ok(());
+    }
+
+    match cli.command {
+        Some(Commands::Tiktoken { text }) => commands::tiktoken::handle_tiktoken(&text),
+        Some(Commands::Mcp { mcp_command }) => mcp_command.execute_async(&cli.path).await,
+        Some(Commands::Ai { ai_command }) => ai_command.execute(&cli.path),
+        Some(Commands::Stack { stack_command }) => stack_command.execute(&cli.path),
+        Some(Commands::Budget { budget_command }) => budget_command.execute(&cli.path),
+        Some(Commands::App { app_command }) => app_command.execute(&cli.path),
+        Some(Commands::Cli { cli_command }) => cli_command.execute(&cli.path),
+        Some(Commands::Model { model_command }) => model_command.execute(&cli.path),
+        Some(Commands::DotCheck { command }) => {
+            CliCommands::Check { command }.execute(&cli.path)
+        }
+        Some(Commands::Init { init_command }) => init_command.execute(&cli.path),
+        Some(Commands::Whoami) => whoami::whoami(&cli.path),
+        Some(Commands::Checkpoint { message, skip_tests, message_flag }) => {
+            let effective_message = message.as_ref().or(message_flag.as_ref());
+            checkpoint(effective_message.map(|s| s.as_str()), skip_tests)
+        }
+        Some(Commands::Whatismy { whatismy_command }) => whatismy_command.execute(&cli.path),
+        Some(Commands::Status { filter, installed, available }) => {
+            show_status(&cli.path, filter.as_ref().map(|s| s.as_str()), installed, available)
+        }
+        Some(Commands::K8s { k8s_command }) => k8s_command.execute(&cli.path),
+        Some(Commands::Install { install_command }) => install_command.execute(&cli.path),
+        Some(Commands::Session { session_command }) => session_command.execute(&cli.path),
+        Some(Commands::Agent { agent_command }) => commands::agent::handle_agent_command(agent_command).await,
+        Some(Commands::Job { job_command }) => job_command.execute_async(&cli.path).await,
+        Some(Commands::Chat { chat_command }) => chat_command.execute().await,
+        Some(Commands::Learn(args)) => handle_learn(&cli.path, args),
+        Some(Commands::Datum { datum_command }) => crate::commands::datum::handle_datum_command(&cli.path, &datum_command),
+        Some(Commands::Grok { grok_command }) => crate::commands::grok::handle_grok_command(grok_command).await,
+        Some(Commands::Up { yes }) => handle_up_command(&cli.path, yes),
+        Some(Commands::Bootstrap { bootstrap_command }) => crate::commands::bootstrap::handle_bootstrap_command(bootstrap_command).await,
+        Some(Commands::Script { script_command }) => crate::commands::script::handle_script_command(script_command),
+        None => {
+            eprintln!("No command provided. Use --help for usage information.");
+            Err(anyhow::anyhow!("No command provided"))
+        }
+    }
+}
+
+// This is the new main entrypoint for the 00t-cli executable.
+// It is no longer at the top of the file.
+/*
+#[tokio::main]
+async fn main() {
+    let args = std::env::args_os();
+    if let Err(e) = run_app(args).await {
+        eprintln!("Error: {}", e);
+        std::process::exit(1);
+    }
+}
+*/
+
+/// This function is the entry point that will be called from Python.
+#[pyfunction]
+fn b00t_py_run(args: Vec<String>) -> PyResult<i32> {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    match rt.block_on(run_app(args)) {
+        Ok(_) => Ok(0),
+        Err(e) => {
+            eprintln!("Error: {}", e);
+            Ok(1)
+        }
+    }
+}
+
+/// This function defines the Python module and exposes the 00t_py_run function.
+#[pymodule]
+fn b00t_cli(_py: Python, m: &PyModule) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(b00t_py_run, m)?)?;
+    Ok(())
 }
