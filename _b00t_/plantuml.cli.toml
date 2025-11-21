@@ -1,0 +1,17 @@
+# ~/.dotfiles/_b00t_/plantuml.cli.toml
+[b00t]
+name = "plantuml"
+hint = "Generates UML diagrams from plain text language."
+
+# For Debian/Ubuntu-based systems
+install = "sudo apt-get install -y plantuml"
+
+# For macOS with Homebrew
+# install = "brew install plantuml"
+
+# How to check the installed version
+version = "plantuml -version"
+
+# Regex to extract the version number from the command's output
+version_regex = "PlantUML version (\\d+\\.\\d+\\.\\d+)"
+
