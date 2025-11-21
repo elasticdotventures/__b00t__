@@ -1,0 +1,100 @@
+name: Publish Python Package to PyPI
+
+on:
+  push:
+    branches:
+      - feat/python-packaging-installer
+  release:
+    types: [created]
+  workflow_dispatch:
+
+jobs:
+  test-rust:
+    name: Run Rust Tests
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Run tests
+        run: cargo test --workspace --all-features
+
+  build-wheels:
+    name: Build Python wheels
+    needs: [test-rust]
+    runs-on: ubuntu-latest # cibuildwheel manages runners for other OSs
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU (for ARM builds, optional but good practice)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v2.16.5
+        env:
+          # This tells cibuildwheel to build wheels for Linux, Windows, and macOS
+          CIBW_BUILD: "cp38-manylinux_x86_64 cp38-win_amd64 cp38-macosx_x86_64" # Example for Python 3.8
+          # You can add more python versions here, e.g., "cp39-*" "cp310-*"
+          CIBW_RUST_CARGO_ARGS: "--manifest-path b00t-cli/Cargo.toml"
+          CIBW_ENVIRONMENT: 'PATH="$PATH:$HOME/.cargo/bin"'
+          CIBW_BEFORE_BUILD: "pip install -U setuptools-rust"
+        with:
+          # The package to build is in the b00t-py-wrapper directory
+          package-dir: b00t-py-wrapper
+          output-dir: wheelhouse
+          
+      - uses: actions/upload-artifact@v4
+        with:
+          name: python-wheels
+          path: ./wheelhouse/*.whl
+
+  publish-to-test-pypi:
+    name: Publish to TestPyPI
+    needs: [build-wheels]
+    runs-on: ubuntu-latest
+    environment:
+      name: test-pypi
+      url: https://test.pypi.org/p/b00t
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: python-wheels
+          path: dist
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          
+  publish-to-pypi:
+    name: Publish to PyPI
+    if: github.event_name == 'release' && github.event.action == 'created'
+    needs: [publish-to-test-pypi]
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/b00t
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: python-wheels
+          path: dist
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
