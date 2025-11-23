@@ -328,10 +328,23 @@ fi
 
 # handy for generating dumps, etc..
 # $ script.sh >> foobar.`ymd`
+if ! command -v ymd >/dev/null 2>&1; then
+    ymd() { date +'%Y%m%d'; }
+fi
+if ! command -v ymd_hm >/dev/null 2>&1; then
+    ymd_hm() { date +'%Y%m%d.%H%M'; }
+fi
+if ! command -v ymd_hms >/dev/null 2>&1; then
+    ymd_hms() { date +'%Y%m%d.%H%M%S'; }
+fi
 alias yyyymmdd="date +'%Y%m%d'"
 alias ymd="date +'%Y%m%d'"
 alias ymd_hm="date +'%Y%m%d.%H%M'"
 alias ymd_hms="date +'%Y%m%d.%H%M%S'"
+# Ensure date helpers are available in non-interactive shells where aliases are disabled
+if ! command -v ymd >/dev/null 2>&1; then ymd(){ date +'%Y%m%d'; }; fi
+if ! command -v ymd_hm >/dev/null 2>&1; then ymd_hm(){ date +'%Y%m%d.%H%M'; }; fi
+if ! command -v ymd_hms >/dev/null 2>&1; then ymd_hms(){ date +'%Y%m%d.%H%M%S'; }; fi
 ##################
 
 
@@ -817,8 +830,12 @@ elif [ "$(rand0 10)" -gt 5 ] ; then
         /bin/rm -f $motdTmpFile
     fi
 
-    # part of motd
+# part of motd
 
+# Fallback calendar helper for hosts without ymd in PATH
+if ! command -v ymd >/dev/null 2>&1; then
+    ymd() { date +%Y%m%d; }
+fi
     log_📢_记录 "lang: $LANG"
     log_📢_记录 "🥾📈 motd project stats, cleanup, tasks goes here. "
     local skunk_x=0
