@@ -7,11 +7,9 @@ use std::fs;
 // use std::io::{Read};
 // use std::path::PathBuf;
 // 🤓 cleaned up unused Tera import after switching to simple string replacement
-use b00t_cli::{
-    AiConfig, BootDatum,
-    SessionState, UnifiedConfig,
-};
+use b00t_cli::{AiConfig, BootDatum, SessionState, UnifiedConfig};
 
+mod cloud_sync;
 mod commands;
 mod datum_ai;
 mod datum_apt;
@@ -22,11 +20,10 @@ mod datum_gemini;
 mod datum_mcp;
 mod datum_vscode;
 mod session_memory;
+mod test_cloud_integration;
 mod traits;
 mod utils;
 mod whoami;
-mod cloud_sync;
-mod test_cloud_integration;
 use utils::get_workspace_root;
 
 // 🦨 REMOVED unused K8sDatum import - not used in main.rs
@@ -39,11 +36,18 @@ use datum_mcp::McpDatum;
 use datum_vscode::VscodeDatum;
 use traits::*;
 
-use crate::commands::{AcpCommands, AiCommands, AppCommands, CliCommands, GrokCommands, InitCommands, K8sCommands, McpCommands, SessionCommands, WhatismyCommands};
 use crate::commands::learn::handle_learn;
+use crate::commands::{
+    AcpCommands, AiCommands, AppCommands, CliCommands, GrokCommands, InitCommands, K8sCommands,
+    McpCommands, SessionCommands, WhatismyCommands,
+};
 
 // Re-export commonly used functions for datum modules
-pub use b00t_cli::{DatumType, get_config, get_expanded_path, get_mcp_config, get_mcp_toml_files, mcp_add_json, mcp_remove, mcp_list, mcp_output, claude_code_install_mcp, vscode_install_mcp, gemini_install_mcp, dotmcpjson_install_mcp};
+pub use b00t_cli::{
+    DatumType, claude_code_install_mcp, dotmcpjson_install_mcp, gemini_install_mcp, get_config,
+    get_expanded_path, get_mcp_config, get_mcp_toml_files, mcp_add_json, mcp_list, mcp_output,
+    mcp_remove, vscode_install_mcp,
+};
 
 mod integration_tests;
 
@@ -117,7 +121,11 @@ Tips:
         lesson: Option<String>,
         #[clap(long, group = "scope", help = "Record lesson for this repo (default)")]
         repo: bool,
-        #[clap(long, group = "scope", help = "Record lesson globally (mutually exclusive with --repo)")]
+        #[clap(
+            long,
+            group = "scope",
+            help = "Record lesson globally (mutually exclusive with --repo)"
+        )]
         global: bool,
     },
     #[clap(
@@ -149,7 +157,9 @@ The system will:
     Advice {
         #[clap(help = "Tool name")]
         tool: String,
-        #[clap(help = "Error pattern to get advice for, 'list' to show all lessons, or 'search <query>'")]
+        #[clap(
+            help = "Error pattern to get advice for, 'list' to show all lessons, or 'search <query>'"
+        )]
         query: String,
         #[clap(long, help = "Maximum number of results to return (default: 5)")]
         count: Option<usize>,
@@ -199,7 +209,7 @@ The system will:
         skip_tests: bool,
 
         #[clap(long = "message", help = "Commit message (MCP compatibility)")]
-        message_flag: Option<String>,  // 🦨 MCP compatibility: accept --message flag
+        message_flag: Option<String>, // 🦨 MCP compatibility: accept --message flag
     },
     #[clap(about = "Query system information")]
     Whatismy {
@@ -221,7 +231,7 @@ The system will:
         available: bool,
 
         #[clap(long = "filter", help = "Filter by subsystem (MCP compatibility)")]
-        filter_flag: Option<String>,  // 🦨 MCP compatibility: accept --filter flag
+        filter_flag: Option<String>, // 🦨 MCP compatibility: accept --filter flag
     },
     #[clap(about = "Kubernetes (k8s) cluster and pod management")]
     K8s {
@@ -246,7 +256,7 @@ The system will:
         topic: Option<String>,
 
         #[clap(long = "topic", help = "Topic to learn about (MCP compatibility)")]
-        topic_flag: Option<String>,  // 🦨 MCP compatibility: accept --topic flag
+        topic_flag: Option<String>, // 🦨 MCP compatibility: accept --topic flag
     },
     #[clap(about = "Grok knowledgebase RAG system")]
     Grok {
@@ -313,6 +323,208 @@ fn datum_providers_to_tool_status(providers: Vec<Box<dyn DatumProvider>>) -> Vec
         .collect()
 }
 
+fn handle_up_command(_b00t_path: &str, yes: bool) -> Result<()> {
+    use b00t_cli::datum_config::B00tConfig;
+
+    // Load or create configuration
+    let (config, config_path) = B00tConfig::load_or_create()?;
+
+    if yes {
+        println!("🔄 Updating all datums from {}...", config_path.display());
+    } else {
+        println!(
+            "🔍 Checking all datums from {} (use --yes to update)...",
+            config_path.display()
+        );
+    }
+
+    // If config file doesn't exist yet, show helpful message
+    if !config_path.exists() {
+        println!("\n⚠️  No _b00t_.toml found at {}", config_path.display());
+        println!("   Create one to track your installed datums:\n");
+        println!("   Example _b00t_.toml:");
+        println!("   ---");
+        println!("   version = \"{}\"", b00t_c0re_lib::version::VERSION);
+        println!("   initialized = \"{}\"", chrono::Utc::now().to_rfc3339());
+        println!("   install_methods = [\"docker\", \"pkgx\", \"apt\", \"curl\"]");
+        println!("   datums = [");
+        println!("     \"git.cli\",");
+        println!("     \"docker.docker\",");
+        println!("     \"rust.*\",    # All rust-related datums");
+        println!("     \"ai.*\",      # All AI providers");
+        println!("   ]");
+        println!("   [checks]        # Optional per-host registry (true=check, false=ignore)");
+        println!("   docker = true");
+        println!("   podman = false");
+        println!("   ---\n");
+        println!("💡 Run `b00t install <datum>` to auto-create and update this file.");
+        return Ok(());
+    }
+
+    println!("\n📋 Configuration loaded:");
+    println!("   Version: {}", config.version);
+    println!("   Datums: {:?}", config.datums);
+    println!("   Install methods: {:?}", config.install_methods);
+    println!("   Checks: {:?}", config.checks);
+    println!(
+        "🤖 Need fixes? Use `b00t up --help` or delegate via `b00t-cli whatismy agent` to pick the right agent."
+    );
+
+    let path = "~/.dotfiles/_b00t_";
+
+    // Collect all datums using existing providers and filter early
+    let mut all_tools = Vec::new();
+    all_tools.extend(filter_and_convert(
+        load_datum_providers::<CliDatum>(path, ".cli.toml")?,
+        &config.datums,
+        &config.checks,
+    ));
+    all_tools.extend(filter_and_convert(
+        load_datum_providers::<McpDatum>(path, ".mcp.toml")?,
+        &config.datums,
+        &config.checks,
+    ));
+    all_tools.extend(filter_and_convert(
+        load_datum_providers::<AiDatum>(path, ".ai.toml")?,
+        &config.datums,
+        &config.checks,
+    ));
+    all_tools.extend(filter_and_convert(
+        load_datum_providers::<AiModelDatumEntry>(path, ".ai_model.toml")?,
+        &config.datums,
+        &config.checks,
+    ));
+    all_tools.extend(filter_and_convert(
+        load_datum_providers::<AptDatum>(path, ".apt.toml")?,
+        &config.datums,
+        &config.checks,
+    ));
+    all_tools.extend(filter_and_convert(
+        load_datum_providers::<BashDatum>(path, ".bash.toml")?,
+        &config.datums,
+        &config.checks,
+    ));
+    all_tools.extend(filter_and_convert(
+        load_datum_providers::<DockerDatum>(path, ".docker.toml")?,
+        &config.datums,
+        &config.checks,
+    ));
+    all_tools.extend(filter_and_convert(
+        load_datum_providers::<VscodeDatum>(path, ".vscode.toml")?,
+        &config.datums,
+        &config.checks,
+    ));
+    all_tools.extend(get_other_tools_status(path)?);
+
+    if all_tools.is_empty() {
+        println!("⚠️  No datums matched the configuration.");
+        println!("🤖 Need fixes? Use `b00t up --help` or delegate via `b00t-cli whatismy agent`.");
+        return Ok(());
+    }
+
+    // Present status table
+    println!("\nStatus:");
+    for tool in &all_tools {
+        let id = format!("{}.{}", tool.name, tool.subsystem);
+        let version_str = match (&tool.current_version, &tool.desired_version) {
+            (Some(cur), Some(des)) => format!("{cur} → {des}"),
+            (Some(cur), None) => cur.clone(),
+            (None, Some(des)) => format!("? → {des}"),
+            _ => "-".to_string(),
+        };
+        println!(
+            "{} {} {:<18} {:<8} {:<14} {}",
+            tool.status_icon(),
+            tool.version_emoji(),
+            id,
+            tool.subsystem,
+            version_str,
+            tool.hint
+        );
+    }
+
+    if yes {
+        println!("\n⚠️  --yes (auto-update) not yet implemented; status only.");
+    }
+
+    println!(
+        "\n🤖 Need fixes? Use `b00t up --help` or delegate via `b00t-cli whatismy agent` to pick the right agent."
+    );
+
+    Ok(())
+}
+
+fn pattern_matches_id(pattern: &str, name: &str, subsystem: &str, id: &str) -> bool {
+    if pattern == "*" || pattern == "*.*" {
+        return true;
+    }
+    if pattern == id || pattern == name || pattern == subsystem {
+        return true;
+    }
+    let parts: Vec<&str> = pattern.split('.').collect();
+    if parts.len() == 2 {
+        let (pname, ptype) = (parts[0], parts[1]);
+        let name_match = pname == "*" || pname == name;
+        let type_match = ptype == "*" || ptype == subsystem;
+        return name_match && type_match;
+    }
+    false
+}
+
+fn datum_selected_by_patterns(name: &str, subsystem: &str, patterns: &[String]) -> bool {
+    if patterns.is_empty() {
+        return true;
+    }
+    let id = format!("{}.{}", name, subsystem);
+    patterns
+        .iter()
+        .any(|p| pattern_matches_id(p, name, subsystem, &id))
+}
+
+fn check_enabled_by_registry(
+    name: &str,
+    subsystem: &str,
+    checks: &std::collections::HashMap<String, bool>,
+) -> bool {
+    let id = format!("{}.{}", name, subsystem);
+    for key in [&id, name, subsystem] {
+        if let Some(enabled) = checks.get(key) {
+            if !*enabled {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+fn filter_and_convert(
+    providers: Vec<Box<dyn DatumProvider>>,
+    patterns: &[String],
+    checks: &std::collections::HashMap<String, bool>,
+) -> Vec<ToolStatus> {
+    providers
+        .into_iter()
+        .filter(|p| datum_selected_by_patterns(p.name(), p.subsystem(), patterns))
+        .filter(|p| check_enabled_by_registry(p.name(), p.subsystem(), checks))
+        .map(|provider| {
+            let is_installed = DatumChecker::is_installed(provider.as_ref());
+            let is_disabled = StatusProvider::is_disabled(provider.as_ref());
+            let version_status = DatumChecker::version_status(provider.as_ref());
+
+            ToolStatus {
+                name: StatusProvider::name(provider.as_ref()).to_string(),
+                subsystem: StatusProvider::subsystem(provider.as_ref()).to_string(),
+                installed: is_installed,
+                available: FilterLogic::is_available(provider.as_ref()),
+                disabled: is_disabled,
+                version_status: Some(version_status.emoji().to_string()),
+                current_version: DatumChecker::current_version(provider.as_ref()),
+                desired_version: DatumChecker::desired_version(provider.as_ref()),
+                hint: StatusProvider::hint(provider.as_ref()).to_string(),
+            }
+        })
+        .collect()
+}
 
 fn checkpoint(message: Option<&str>, skip_tests: bool) -> Result<()> {
     println!("🥾 Creating checkpoint...");
@@ -342,7 +554,10 @@ fn checkpoint(message: Option<&str>, skip_tests: bool) -> Result<()> {
     }
 
     // Generate commit message with checkpoint number
-    let default_msg = format!("🥾 checkpoint #{}: automated commit via b00t-cli", checkpoint_count);
+    let default_msg = format!(
+        "🥾 checkpoint #{}: automated commit via b00t-cli",
+        checkpoint_count
+    );
     let commit_msg = message.unwrap_or(&default_msg);
 
     // Add all files (including untracked)
@@ -400,7 +615,10 @@ fn checkpoint(message: Option<&str>, skip_tests: bool) -> Result<()> {
             // CI integration hints
             println!("💡 Next steps:");
             println!("   • Run `git push` to trigger CI pipeline");
-            println!("   • Create PR: `gh pr create --title \"{}\"` (if ready)", commit_msg);
+            println!(
+                "   • Create PR: `gh pr create --title \"{}\"` (if ready)",
+                commit_msg
+            );
         }
         Err(e) => {
             let _ = memory.incr("failed_commits");
@@ -413,7 +631,6 @@ fn checkpoint(message: Option<&str>, skip_tests: bool) -> Result<()> {
 
     Ok(())
 }
-
 
 /// Generic function to load datum providers for a specific file extension
 /// Replaces the 7 duplicate get_*_tools_status functions
@@ -752,7 +969,11 @@ echo "malicious" > ~/.dotfiles/_b00t_/hack.toml
         ("Apt", "APT packages", vec![".apt.toml"]),
         ("Nix", "Nix packages", vec![".nix.toml"]),
         ("Bash", "Bash scripts", vec![".bash.toml"]),
-        ("Role", "Role onboarding/compliance datums", vec![".role.toml", ".toml (type=role)"]),
+        (
+            "Role",
+            "Role onboarding/compliance datums",
+            vec![".role.toml", ".toml (type=role)"],
+        ),
     ];
 
     println!("### DatumType Enum");
@@ -1138,7 +1359,7 @@ async fn main() {
                 eprintln!("Error: {}", e);
                 std::process::exit(1);
             }
-        },
+        }
         Some(Commands::Mcp { mcp_command }) => {
             if let Err(e) = mcp_command.execute(&cli.path) {
                 eprintln!("Error: {}", e);
@@ -1175,7 +1396,11 @@ async fn main() {
                 std::process::exit(1);
             }
         }
-        Some(Commands::Checkpoint { message, skip_tests, message_flag }) => {
+        Some(Commands::Checkpoint {
+            message,
+            skip_tests,
+            message_flag,
+        }) => {
             // 🦨 MCP compatibility: merge positional and flag arguments
             let effective_message = message.as_ref().or(message_flag.as_ref());
             if let Err(e) = checkpoint(effective_message.map(|s| s.as_str()), *skip_tests) {
@@ -1189,10 +1414,20 @@ async fn main() {
                 std::process::exit(1);
             }
         }
-        Some(Commands::Status { filter, installed, available, filter_flag }) => {
+        Some(Commands::Status {
+            filter,
+            installed,
+            available,
+            filter_flag,
+        }) => {
             // 🦨 MCP compatibility: merge positional and flag arguments
             let effective_filter = filter.as_ref().or(filter_flag.as_ref());
-            if let Err(e) = show_status(&cli.path, effective_filter.map(|s| s.as_str()), *installed, *available) {
+            if let Err(e) = show_status(
+                &cli.path,
+                effective_filter.map(|s| s.as_str()),
+                *installed,
+                *available,
+            ) {
                 eprintln!("Error: {}", e);
                 std::process::exit(1);
             }
@@ -1253,7 +1488,12 @@ async fn main() {
                 std::process::exit(1);
             }
         }
-        Some(Commands::Lfmf { tool, lesson, repo, global }) => {
+        Some(Commands::Lfmf {
+            tool,
+            lesson,
+            repo,
+            global,
+        }) => {
             // Validate required fields
             let tool = match tool {
                 Some(t) => t,
@@ -1295,7 +1535,7 @@ async fn main() {
         }
         Some(Commands::Script { script_command }) => {
             use crate::commands::script::handle_script_command;
-            
+
             if let Err(e) = handle_script_command(script_command.clone()) {
                 eprintln!("Error: {}", e);
                 std::process::exit(1);
